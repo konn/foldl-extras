@@ -1,38 +1,56 @@
-{-# LANGUAGE AllowAmbiguousTypes, BangPatterns, DeriveFunctor, DerivingVia #-}
-{-# LANGUAGE FlexibleContexts, FlexibleInstances, FunctionalDependencies   #-}
-{-# LANGUAGE GADTs, LambdaCase, MultiParamTypeClasses, PatternSynonyms     #-}
-{-# LANGUAGE QuantifiedConstraints, RankNTypes, ScopedTypeVariables        #-}
-{-# LANGUAGE TypeApplications, TypeFamilies, TypeOperators                 #-}
-{-# LANGUAGE UndecidableInstances                                          #-}
+{-# LANGUAGE AllowAmbiguousTypes, BangPatterns, DefaultSignatures          #-}
+{-# LANGUAGE DeriveFunctor, DerivingVia, FlexibleContexts                  #-}
+{-# LANGUAGE FlexibleInstances, FunctionalDependencies, GADTs, LambdaCase  #-}
+{-# LANGUAGE MultiParamTypeClasses, PatternSynonyms, QuantifiedConstraints #-}
+{-# LANGUAGE RankNTypes, ScopedTypeVariables, TypeApplications             #-}
+{-# LANGUAGE TypeFamilies, TypeOperators, UndecidableInstances             #-}
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 -- | Provides generic abstractions over
 --   @'Fl.Fold'@ and @'Fl.FoldM'@.
 module Control.Foldl.Extra.Generic
   ( Folder(..), Rep', foldIt, finish
   ) where
-import Control.Arrow
-import Control.Comonad
-import Control.Foldl          as Fl
-import Control.Monad.ST
-import Data.Coerce
-import Data.Functor.Identity
-import Data.Profunctor
-import Data.Profunctor.Rep
-import Data.Profunctor.Sieve
-import Data.Profunctor.Unsafe
+import           Control.Arrow
+import           Control.Comonad
+import           Control.Foldl         as Fl
+import           Control.Monad.ST
+import qualified Data.Bifunctor        as B
+import           Data.Coerce
+import           Data.Functor.Identity
+import           Data.Monoid           (Endo (..))
+import           Data.Profunctor
+import           Data.Profunctor.Rep
+import           Data.Profunctor.Sieve
 
 class (Profunctor fold, Representable (Arr fold))
    => Folder fold where
   type Arr fold :: * -> * -> *
+  runFoldOver :: HandlerM (Rep' fold) x a -> fold a b -> Arr fold x b
+  handle :: HandlerM (Rep' fold) a b -> Arr fold (fold b r) (fold a r)
   runFold' :: Foldable t => fold a b -> Arr fold (t a) b
+  default runFold'
+    :: (Foldable t, Monad (Rep' fold))
+    => fold a b -> Arr fold (t a) b
+  runFold' = runFoldOver folded
   suspend   :: fold a b -> fold a (fold a b)
   finish'  :: Arr fold (fold a b) b
   fromFoldUnwrap
     :: (forall x. (x -> a -> Rep' fold x) -> Rep' fold x -> (x -> Rep' fold b) -> r)
     -> fold a b -> Rep' fold r
 
+genEndo :: Endo a -> EndoM Identity a
+genEndo = coerce
+
+simpHandler
+  :: HandlerM Identity a b -> Handler a b
+simpHandler h =  \f -> fmap (B.first coerce) $
+    h (B.first (fmap genEndo) . f)
+
 instance Folder Fold where
   type Arr Fold = (->)
+  handle h = handles $ simpHandler h
+  runFoldOver h = Fl.foldOver $ simpHandler h
+  {-# INLINE runFoldOver #-}
   runFold' = Fl.fold
   {-# INLINE runFold' #-}
   suspend = duplicate
@@ -51,6 +69,10 @@ instance Monad m => Folder (FoldM m) where
   {-# SPECIALISE instance Folder (FoldM IO) #-}
   {-# SPECIALISE instance Folder (FoldM (ST s)) #-}
   type Arr (FoldM m) = Kleisli m
+  runFoldOver h = fmap Kleisli $ foldOverM h
+  {-# INLINE runFoldOver #-}
+  handle h = Kleisli $ pure . handlesM h
+  {-# INLINE handle #-}
   runFold' = Kleisli . Fl.foldM
   {-# INLINE runFold' #-}
   suspend = duplicateM

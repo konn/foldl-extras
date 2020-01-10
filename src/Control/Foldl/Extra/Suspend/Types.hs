@@ -16,6 +16,12 @@ instance (Functor (Rep' fold), Profunctor fold) => Profunctor (Suspended fold) w
 
 instance (Monad (Rep' fold), Folder fold) => Folder (Suspended fold) where
   type Arr (Suspended fold) = Arr fold
+  runFoldOver h (Suspended mfold) = tabulate $ \x -> do
+    fld <- mfold
+    sieve (runFoldOver h fld) x
+  handle h = tabulate $ \(Suspended mfold) -> return $ Suspended $ do
+    fldM <- mfold
+    sieve (handle h) fldM
   runFold' (Suspended mfold) = tabulate $ \t -> do
     fld <- mfold
     foldIt fld t

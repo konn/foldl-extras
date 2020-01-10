@@ -28,6 +28,7 @@ dependencies:
 - profunctors
 - vector
 - primitive
+- lens
 
 ghc-options:
 - -Wall
